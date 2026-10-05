@@ -65,7 +65,7 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条探方管理记录</span>
-      <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span v-if="errorMessage" :class="actionOk ? 'notice-text' : 'error-text'">{{ errorMessage }}</span>
     </footer>
   </section>
 </template>
@@ -80,7 +80,9 @@ import {
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
+import { useSessionStore } from '@/stores/session'
 
+const session = useSessionStore()
 const meta = moduleMeta('trench')
 const columns = ["探方编号", "所属发掘区", "探方尺寸", "发掘层位", "负责人", "开工日期", "完成日期", "探方状态"]
 const actions = ["开始发掘", "确认到底", "安排回填"]
@@ -90,6 +92,7 @@ const stats = [{"label": "探方总数", "value": 0}, {"label": "发掘中探方
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const actionOk = ref(true)
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 const statusSummary = computed(() =>
@@ -114,16 +117,30 @@ function openCreate() {
 
 function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
+  // 开始发掘会联动生成耗材领用待办，沿开工入口把负责人作为经办人、开工发掘作为用途带上。
+  const trenchCode = String(row['探方编号'] ?? row.id)
+  const context =
+    action === '开始发掘'
+      ? {
+          trenchCode,
+          operator: String(row['负责人'] ?? session.operator),
+          purpose: `探方${trenchCode}开工发掘领用`,
+        }
+      : {}
+  const result = applyAction(meta.key, Number(row.id), action, context)
   if (!result.ok) {
+    actionOk.value = false
     errorMessage.value = result.message
     return
   }
+  actionOk.value = true
+  errorMessage.value = result.message
   reload()
 }
 
 function reload() {
   errorMessage.value = ''
+  actionOk.value = true
   try {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
